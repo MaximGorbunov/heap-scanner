@@ -6,5 +6,5 @@ java  --add-opens java.base/java.lang=ALL-UNNAMED --add-modules jdk.hotspot.agen
 ```
 
 ## Flags
-### --print-bytes-arrays
+### --print-byte-arrays
 Prints old generation byte arrays content as string 

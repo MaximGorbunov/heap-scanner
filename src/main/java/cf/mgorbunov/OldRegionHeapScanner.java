@@ -1,11 +1,10 @@
 package cf.mgorbunov;
 
 import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
 import sun.jvm.hotspot.debugger.Address;
 import sun.jvm.hotspot.gc.g1.G1CollectedHeap;
 import sun.jvm.hotspot.gc.g1.HeapRegion;
+import sun.jvm.hotspot.gc.g1.HeapRegionManager;
 import sun.jvm.hotspot.gc.shared.CollectedHeap;
 import sun.jvm.hotspot.memory.Universe;
 import sun.jvm.hotspot.oops.Array;
@@ -25,13 +24,15 @@ public class OldRegionHeapScanner extends Tool {
     private static boolean printByteArrays = false;
 
     public static void main(String[] args) {
+        ArrayList<String> newArgs = new ArrayList<>();
         for (String arg : args) {
-            if ("--print-bytes-arrays".equals(arg)) {
+            if ("--print-byte-arrays".equals(arg)) {
                 printByteArrays = true;
-                break;
+            } else {
+                newArgs.add(arg);
             }
         }
-        new OldRegionHeapScanner().execute(args);
+        new OldRegionHeapScanner().execute(newArgs.toArray(args));
     }
 
     @Override
@@ -43,35 +44,16 @@ public class OldRegionHeapScanner extends Tool {
 
             if (heap instanceof G1CollectedHeap) {
                 G1CollectedHeap g1CollectedHeap = (G1CollectedHeap) heap;
-                List<HeapRegionBounds> oldGenRegions = new ArrayList<>();
-                List<HeapRegionBounds> humongousGenRegions = new ArrayList<>();
-                Iterator<HeapRegion> heapRegionIterator = g1CollectedHeap.hrm().heapRegionIterator();
-                while (heapRegionIterator.hasNext()) {
-                    HeapRegion next = heapRegionIterator.next();
-                    HeapRegionBounds heapRegionBounds = new HeapRegionBounds(next.bottom(), next.end());
-                    if (next.isOld()) {
-                        oldGenRegions.add(heapRegionBounds);
-                    } else if (next.isHumongous()) {
-                        humongousGenRegions.add(heapRegionBounds);
-                    }
-                }
+                HeapRegionManager heapRegionManager = g1CollectedHeap.hrm();
 
                 ObjectHistogram objectHistogram = new ObjectHistogram() {
                     @Override
                     public boolean doObj(Oop obj) {
-                        for (HeapRegionBounds region : oldGenRegions) {
-                            if (containsInRegion(obj, region)) {
-                                handleTypeArray(obj, vm);
-                                super.doObj(obj);
-                                return true;
-                            }
-                        }
-                        for (HeapRegionBounds region : humongousGenRegions) {
-                            if (containsInRegion(obj, region)) {
-                                handleTypeArray(obj, vm);
-                                super.doObj(obj);
-                                return true;
-                            }
+                        HeapRegion region = heapRegionManager.getByAddress(obj.getHandle());
+                        if (region.isHumongous() || region.isOld()) {
+                            handleTypeArray(obj, vm);
+                            super.doObj(obj);
+                            return true;
                         }
                         return false;
                     }
@@ -89,6 +71,7 @@ public class OldRegionHeapScanner extends Tool {
             if (obj instanceof TypeArray) {
                 TypeArray typeArray = (TypeArray) obj;
                 long length = typeArray.getLength();
+                System.out.println("================================================Byte array size: " + length);
                 TypeArrayKlass typeArrayKlass = (TypeArrayKlass) typeArray.getKlass();
                 if (TypeArrayKlass.T_BYTE == typeArrayKlass.getElementType()) {
                     byte[] arr = new byte[(int) length];
@@ -99,13 +82,10 @@ public class OldRegionHeapScanner extends Tool {
                         arr[index] = byteField.getValue(obj);
                     }
                     System.out.println(new String(arr));
+                    System.out.println("================================================");
                 }
             }
         }
-    }
-
-    private static boolean containsInRegion(Oop obj, HeapRegionBounds region) {
-        return AddressOps.gte(obj.getHandle(), region.bottom) && AddressOps.lt(obj.getHandle(), region.end);
     }
 
     static class HeapRegionBounds {
